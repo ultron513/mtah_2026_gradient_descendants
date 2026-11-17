@@ -1,8 +1,10 @@
 # Phased Implementation Roadmap (Step-by-Step)
 
 **Team Gradient Descendants** · *More than a Hack 2027, Phase 1 (Ball Possession: BAR–ATH)*  
-**Current Baseline:** Phase 6 (`spellF1` 0.592 on simulated IDSSE, 0.600 on public 5-minute slice)  
-**Objective:** Resolve the short-possession ceiling (< 2s–5s) and push `spellF1` toward the theoretical limit (~0.84) via disciplined, non-breaking, sequential steps.
+**Starting baseline (when drafted):** Phase 6 (`spellF1` 0.592 on simulated IDSSE, 0.600 on the public five-minute slice)  
+**Original objective:** Evaluate whether disciplined, non-breaking changes could improve short-possession performance and raise `spellF1` toward the theoretical target (~0.84). This was an aspiration, not a measured outcome or guarantee.
+
+> **Status note — 17 November 2026:** This is a historical roadmap drafted against the Phase 6 baseline. The repository is now at Phase 9. Steps 1–7 were evaluated; the Phase 7 changelog records that their experimental behaviors were kept behind off-by-default controls after they failed the adoption rule. Phase 8 experiments were not adopted. The Phase 9 game-state-aware simulator was adopted. This file preserves the earlier hypotheses and evaluation process; its imperative wording is not a current implementation checklist. For the current implementation and results, see [CHANGES.md](CHANGES.md) and the [Phase 9 specification](docs/specs/phase9.md).
 
 ---
 
@@ -16,7 +18,7 @@
    - Non-regression across all 4 control definitions ($0\text{s}, 0.5\text{s}, 1\text{s}, 2\text{s}$).
    - Strict paired win check ($\ge 6\text{ of } 7$ matches).
 5. **Mandatory Live Logging in `CHANGES.md`:** 
-   Whenever the agent implements any step or code update described in this roadmap, the agent **must immediately update [`CHANGES.md`](file:///c:/barca_innovaton/more-than-a-hack-2027-main/mtah-possession/CHANGES.md)** with:
+   Whenever the agent implements any step or code update described in this roadmap, the agent **must immediately update [`CHANGES.md`](CHANGES.md)** with:
    - Target file modified
    - Exact lines added or changed (`L<start>-L<end>`)
    - The specific role/purpose of the change
@@ -34,7 +36,7 @@
 2. **Conservative Stoppage Ball:** Replace abrupt ball freeze/teleportation during dead-ball intervals with a bounded spatial walk tied to walking velocities, avoiding the full-match false stoppages encountered in earlier trials.
 
 ### Implementation Details
-* **Target File:** [`possession/noise/simulate.py`](file:///c:/barca_innovaton/more-than-a-hack-2027-main/mtah-possession/possession/noise/simulate.py)
+* **Target File:** [`possession/noise/simulate.py`](possession/noise/simulate.py)
 * **Function:** `_degrade_ball()` and `carry_dead_ball()`
 * **Non-Breaking Guarantee:** Exposed via an optional keyword argument `smooth_sigma=0.0` (default) which maintains identical behavior for legacy tests, while setting `smooth_sigma=7.0` for calibrated simulations.
 * **Pass Criterion:** Simulated ball velocity distribution matches BAR–ATH's KS-test threshold, and existing synthetic test suite passes without errors.
@@ -50,7 +52,7 @@
 2. **Capture Immediate Post-Restart Spells:** Allow genuine brief possessions right after a set piece/restart to be credited rather than suppressed by the symmetric transition tax.
 
 ### Implementation Details
-* **Target File:** [`possession/decode.py`](file:///c:/barca_innovaton/more-than-a-hack-2027-main/mtah-possession/possession/decode.py)
+* **Target File:** [`possession/decode.py`](possession/decode.py)
 * **Function:** `potts_edges()`
 * **Non-Breaking Guarantee:** Keep default `lam_dead_out=None` (falling back to standard symmetric `lam_dead`), ensuring exact reproducibility of Phase 6 results unless explicitly enabled.
 * **Pass Criterion:** Increased possession count toward ground truth (~5,100) on simulated validation games without degrading macroF1.
@@ -105,7 +107,7 @@ When adding the $0.4\text{s}$ micro-window code into `possession/features.py`, t
 ```
 
 ### Implementation Details
-* **Target File:** [`possession/features.py`](file:///c:/barca_innovaton/more-than-a-hack-2027-main/mtah-possession/possession/features.py)
+* **Target File:** [`possession/features.py`](possession/features.py)
 * **Function:** `context_windows()` and `compute()`
 * **Non-Breaking Guarantee:** By keeping the $0.4\text{s}$ block commented out initially, existing tests and baseline results run 100% unaltered.
 * **Pass Criterion:** Wins on $\ge 6 \text{ of } 7$ validation games under Leave-One-Match-Out evaluation when uncommented.
@@ -127,7 +129,7 @@ When adding the $0.4\text{s}$ micro-window code into `possession/features.py`, t
 3. **Relative Closing Velocity ($v_{\text{rel}}$):** Replace static scalar distance with signed radial velocity to indicate active interception.
 
 ### Implementation Details
-* **Target File:** [`possession/features.py`](file:///c:/barca_innovaton/more-than-a-hack-2027-main/mtah-possession/possession/features.py)
+* **Target File:** [`possession/features.py`](possession/features.py)
 * **New Constant:** `KINK_SPAN = 6` (leaves existing `SPEED_SPAN = 5` completely untouched).
 * **Functions:** New helpers `_ball_angle_kink()`, `_player_impulses()`, and `_closing_velocity()`
 * **Non-Breaking & Zero Ripple Effect Guarantee:**
@@ -154,7 +156,7 @@ When adding the $0.4\text{s}$ micro-window code into `possession/features.py`, t
    * **Safety Mechanism:** Strong kinematic tracking evidence (e.g. players sprinting, passing) can easily override the weak prior, while ambiguous frames safely receive the slight nudge toward dead ball.
 
 ### Implementation Details
-* **Target Files:** [`possession/features.py`](file:///c:/barca_innovaton/more-than-a-hack-2027-main/mtah-possession/possession/features.py) & [`possession/emission.py`](file:///c:/barca_innovaton/more-than-a-hack-2027-main/mtah-possession/possession/emission.py)
+* **Target Files:** [`possession/features.py`](possession/features.py) & [`possession/emission.py`](possession/emission.py)
 * **Functions:** `boundary_margin` calculation in `compute()` and optional `tagging_prior` addition in `emission.py`.
 * **Non-Breaking Guarantee:** If homography or tagging XML files are omitted, `boundary_margin` defaults to `0.0` and `tagging_prior` defaults to `0.0`, preserving 100% compatibility with standalone synthetic benchmarks.
 * **Pass Criterion:** Improves macroF1 on stoppage transitions without fracturing aerial cross possessions or missing untagged restarts.
@@ -244,7 +246,7 @@ Three specific risks were identified and are mitigated by mandatory conditioning
 - Frames where `ball_present == False` for $> 2\text{s}$ continuously.
 
 ### Implementation Details
-* **Target File:** [`possession/features.py`](file:///c:/barca_innovaton/more-than-a-hack-2027-main/mtah-possession/possession/features.py)
+* **Target File:** [`possession/features.py`](possession/features.py)
 * **New Constants:** `MIN_PROXIMITY_FRAMES = 3`, `MIN_SEPARATION_M = 0.5`, `MAX_CARRY_S = 5.0`, `TOUCH_DECAY_TAU = 1.5`
 * **New Helpers:** `_signed_touch()`, `_last_touch_state()`, `_time_since_touch()`
 * **New Feature Keys:** `f["touch_team"]`, `f["last_touch_team"]`, `f["time_since_touch"]`, `f["touch_signal"]`
@@ -286,15 +288,16 @@ Report precision and recall together: touches per minute, in-play frames with a 
 | **4** | Kinematic Impulse (±6f Kink) & Closing Velocity | `possession/features.py` | **Low** (isolated column) | Detects instant touch events at turnover frames |
 | **5** | Soft Boundary & Weak Tagging Priors | `possession/features.py`, `emission.py` | **Low** (soft feature / prior) | Guides dead-ball calls without parallax kill switches |
 | **6** | Signed Touch State & Possession Persistence | `possession/features.py` | **Low** (guarded additive) | Covers full possession span; $< 2\text{s}$ accuracy 50% → 59% |
+| **7** | Touch Detector Recall & Team Ownership | `possession/features.py` | **Low** (guarded thresholds) | Improve signed-touch coverage while retaining ambiguity and carry safeguards |
 
 ---
 
-## Agent Execution & Logging Protocol
+## Historical Agent Execution and Logging Protocol
 
-For every step executed from this file, the agent must adhere to the following workflow:
+When this roadmap was active, each step followed this workflow:
 1. **Implement:** Write clean, vectorized NumPy code with non-breaking defaults.
 2. **Verify:** Run test suites and validation scripts (e.g., `pytest`).
-3. **Log in `CHANGES.md`:** Immediately append a formal entry to [`CHANGES.md`](file:///c:/barca_innovaton/more-than-a-hack-2027-main/mtah-possession/CHANGES.md) detailing:
+3. **Log in `CHANGES.md`:** Immediately append a formal entry to [`CHANGES.md`](CHANGES.md) detailing:
    - Step number and title
    - File path modified
    - Exact line ranges (`L<start>-L<end>`)
