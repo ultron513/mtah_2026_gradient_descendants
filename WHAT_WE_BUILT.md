@@ -1,105 +1,84 @@
-# What this project contains — team overview
+# What We Built — Gradient Descendants
 
-Team **Gradient Descendants** · More than a Hack 2027, Phase 1 (ball possession, BAR–ATH)
-Current upload: **Phase 6**, SHA-256 `edde29db13a56e2d` (reproduced on Windows and Linux).
+**Competition:** More than a Hack 2027, Phase 1 — ball possession (FC Barcelona vs Athletic Club)
+**Current system:** Phase 9
+**Team:** Gradient Descendants
 
-## The problem in one line
-For every video frame, output H (Barça ball), A (Athletic ball) or D (dead ball). Ranked on
-spellF1 (possessions matched by overlap), tie-break macroF1.
+## Task
 
-## Core idea
-We have no labels for this match (only the public 5 minutes, 17 possessions). So we **train on
-7 public Bundesliga matches with possession labels (IDSSE/DFL)**, degraded by our own simulator
-to look like this match's imperfect tracking, and we select every design choice by
-leave-one-match-out on those simulated games.
+For every video frame, predict who controls the ball: H (Barcelona), A (Athletic Club), D (dead ball), or X (ungraded/abstain). The ranking metric is spellF1, with macroF1 as a secondary metric.
 
-## Everything built, by component
+## Data, assets, and rules
 
-### Data and evaluation (Phase 0)
-- Own parsers for the EPTS tracking (ATD), Smart Tagging XML and the IDSSE/DFL data; npz cache.
-- **Exact re-implementation of the official scorer** (verified identical on 204 cases).
-- Found that the tracker's speed field is m/s although the metadata says km/h; speed is now
-  computed from positions.
+- **Competition match:** BAR-ATH tracking data, Smart Tagging, and the public five-minute labels are used to build and check the pipeline. The public window is a sanity check only; it is not used for model training or tuning. Human frame checks were used only to audit decisions, never to create labels.
+- **Training data:** seven labelled 2022–23 Bundesliga / 2. Bundesliga matches from IDSSE/DFL. The dataset provides per-frame BallStatus and BallPossession labels from DFL positional data. Source: Bassek, Weber, Rein & Memmert (2025), [An integrated dataset of spatiotemporal and event data in elite soccer](https://doi.org/10.1038/s41597-025-04505-y). No labels from the provided BAR-ATH match are used for training.
+- **Possession harmonisation:** external possession can switch on looser contact than the competition's controlled-possession rule. Within an alive stretch, a switch is accepted only when the other team's run lasts at least T seconds; shorter runs remain with the previous team. The first run after a restart is kept and dead-ball labels are unchanged. Models train with T = 1 s and are evaluated at T = 0, 0.5, 1, and 2 s.
+- **Output contract:** one CSV row per frame, numbered 0–199318. Graded frames use H/A/D; ungraded frames use X.
 
-### Noise simulator (Phases 1–2)
-- Ball dropout in bursts, hazard measured on BAR-ATH by pitch zone × crowding × ball speed,
-  calibrated by bisection to BAR-ATH's 59% ball coverage.
-- Player tracklet fragmentation and identity switches at BAR-ATH's coverage.
-- Dead ball: DFL freezes the ball during stoppages; we carry it from out-position to restart.
-- Referees removed from the external data.
+## Pipeline
 
-### Label rule
-- Competition definition of a change of possession ("under control") implemented as a
-  minimum-control rule; training at 1 s, every version scored at 0 / 0.5 / 1 / 2 s because the
-  exact rule is unknown.
+1. Parse the tracking and tagging files into a shared match representation and reproduce the competition scorer.
+2. Measure tracking degradation from BAR-ATH, then degrade clean IDSSE matches so their tracking resembles the competition feed.
+3. Compute ball geometry, player/team shape and movement, ball visibility, and dead-ball evidence.
+4. Fit NumPy logistic-regression and custom histogram gradient-boosting evidence models.
+5. Decode frame scores into whole possession sequences with Potts and semi-Markov methods. Stoppage-edge signals and kick-off tags refine boundaries.
+6. Select settings by leave-one-match-out evaluation on simulated IDSSE matches, with the four possession-control thresholds represented in the objective.
 
-### Features (Phases 3, 5)
-- Ball geometry: nearest player per team, margin, goal-side counts, control runs.
-- Team shape: push, spread, width/length, velocity differences, attack direction from the
-  goalkeepers.
-- Dead-ball signals: player speeds, slow fraction, ball near/over a line, ball visibility gaps.
-- **Context windows**: means over the past / next 2 s and 5 s (biggest single gain, +0.09).
+The pipeline also includes a scorer reimplementation, a format validator, plausibility checks, and deterministic fixed-point decoding. Match data and generated CSVs stay outside the public repository.
 
-### Models (Phase 4)
-- **Own histogram gradient-boosted trees**, numpy only, fully deterministic.
-- Three models: dead ball; team when the ball is visible; team when the ball is missing.
+## Phase 9: realistic ball simulation
 
-### Decoder (Phases 1, 6)
-- Potts / Viterbi smoothing in **integer fixed-point arithmetic** so the file is bit-identical
-  across machines. The team-switch penalty acts as an adaptive minimum-hold rule.
-- **Phase 6: stoppage-edge detectors** — two extra models flag the moment play stops / restarts;
-  the decoder makes stopping / restarting cheap there.
-- Kick-off frames from Smart Tagging; pre-kick-off forced to dead ball.
+The earlier simulator dropped the ball at similar overall rates throughout play. BAR-ATH instead sees the ball on about 87% of live-play frames and about 18% of stoppage frames. Phase 9 profiles this pattern from the Phase 6 model's predictions, not hand labels, and measures stoppage visibility, live-play gaps, and gaps that extend across stoppages and restarts.
 
-### Selection and safety
-- Leave-one-match-out over 7 matches, 50 decoder settings, objective = mean spellF1 over the 4
-  control thresholds; tie band 0.005 (simpler wins) plus a paired check (≥ 6 of 7 matches).
-- Shift guard: KS test between simulated and real feature distributions; strongly shifted
-  features are excluded automatically.
-- Plausibility checks on the output (dead-ball share, possessions per minute, format).
+The simulator now smooths the ball path, carries the ball toward the restart point and lets it rest with small handling movements, applies measured visibility patterns during stoppages, and adds live-play gaps to target 88% visibility. Player simulation, model features, and decoder design stayed the same; the models were retrained and settings reselected on the new simulations. The Phase 6 world remains available as a reproducible fallback.
 
-## Results (simulated, leave-one-match-out, spellF1)
-| Version | Score |
-|---|---|
-| Starter baseline | 0.22 |
-| Phase 1 | 0.33 |
-| Phase 3 team features | 0.47 |
-| Phase 4 boosted trees | 0.50 |
-| Phase 5 context windows | 0.586 |
-| **Phase 6 stoppage edges (upload)** | **0.592** |
+## Results recorded by the project
 
-Public 5 minutes (sanity only, never tuned on): spellF1 0.600, macroF1 0.727 (best official
-baseline 0.42).
+| Evaluation | Phase 6 | Phase 9 |
+|---|---:|---:|
+| Mean spellF1 across seven held-out matches | 0.5570 | 0.5969 (+0.040; Phase 9 better on 7/7) |
+| Blind real-frame audit | 25/53 correct | 32/53 correct |
+| Public five-minute check: spellF1 / macroF1 | 0.600 / 0.727 | 0.562 / 0.826 |
 
-## Checked against the real video
-The organisers allowed AI review of frames; used only to verify decisions, never to make labels.
-- Stoppage calls: right in all 28 clear-cut sampled frames.
-- Phase 6 edge changes: right in 9 of 10 judgeable stretches (corners, throw-ins, goal kicks).
+The latest README also reports a pooled leave-one-match-out objective of 0.5972; the Phase 9 spec's 0.5969 is the arithmetic mean of the seven per-match values. The public five-minute window was not used for tuning and contains only 17 possessions, so its spellF1 change is noisy.
 
-## Tried and not adopted (documented on purpose)
-| Idea | Result |
-|---|---|
-| Restart memory (who restarts after a stoppage) | +0.002, inside noise |
-| Turnover change detector | +0.005, inside noise |
-| 10 s windows, bigger trees | no gain |
-| Ball detection from video (YOLO, own tracker) | 97% accurate fills, but no effect on labels; GPU reproducibility risk |
-| Short 0.5 / 1 s windows | +0.006, only 4 of 7 matches |
-| Touch / impulse features | +0.033 on old sims, +0.004 on realistic sims |
-| Realistic stoppage ball in simulator | public macroF1 0.73 → 0.86 but false stoppages across the match |
+The Phase 9 submission's recorded SHA-256 prefix is `28f7229f96045c50`; the Phase 6 fallback prefix is `edde29db13a56e2d`. The validator prints the full SHA-256.
 
-## Key findings
-- The real tracker **smooths the ball** (~σ 7 frames); our old simulation did not, so it was
-  optimistic (Phase 6 is ≈ 0.57 on realistic sims). Smoothing is now measured and implemented
-  experimentally.
-- The remaining gap is **short possessions**: half of all possessions last < 5 s, and team
-  accuracy in those < 2 s is ~50%. Perfect team calls would lift the score to ~0.84.
+## Experiments not adopted
 
-## Next ideas
-- Player impulses (receiver decelerates / turns) paired with ball direction changes.
-- Relative vectors to the nearest players (direction, closing speed), not only distances.
-- Calibrate the stoppage ball more conservatively so the realistic simulator can be adopted.
+Phase 8 tried receiver/co-movement features for short possessions, training on both smooth and sharp simulations, and averaging several models. None improved at least six of seven held-out matches, so they are not part of the selected pipeline. Camera-based ball detection was also evaluated and not adopted because tracking already sees the ball in most live play and the detections were noisier.
 
-## Reproduce
-See `README.md`: build cache → IDSSE download/build → noise profile → simulate →
-`phase1-select` → `predict`. Specs with full results per phase: `docs/specs/phase1.md` … `phase6.md`.
-Match data and derived frame-level files are never in this repository (licence).
+## Limitations
+
+- A ball held or placed during a throw-in or free kick can still be called live.
+- A long missing-ball gap that spans a stoppage and the restart can be called dead for too long.
+- Live-play visibility is set to 88%; the Phase 9 notes recommend checking sensitivity across the estimated 87–94% range.
+- The public-window spellF1 is lower than Phase 6, despite the higher macroF1; the sample is too small to tune against.
+
+## Reproduce the submission
+
+Use the official data on your machine and keep `MTAH_STATE_OVERRIDES` unset for the recorded Phase 9 settings and hash.
+
+```powershell
+# Stage 1: regenerate the Phase 6 labels used to profile BAR-ATH state
+python -m possession noise-profile
+python -m possession simulate --world phase6
+python -m possession phase1-select
+python -m possession predict --out stage1
+Copy-Item 'stage1/Gradient Descendants.csv' 'cache/stage1_labels.csv'
+
+# Stage 2: train and predict with the Phase 9 simulator
+python -m possession state-profile --labels cache/stage1_labels.csv
+python -m possession simulate
+python -m possession phase1-select
+python -m possession predict
+python validate_submission.py 'submissions/Gradient Descendants.csv'
+```
+
+See [README.md](README.md) for setup and the complete run instructions, and [docs/specs/phase9.md](docs/specs/phase9.md) for the full Phase 9 evidence. The changelog records the full suite as 64 passed and 1 skipped.
+
+## Submission items
+
+1. **Possession CSV:** `Gradient Descendants.csv`, generated and validated locally, then uploaded separately.
+2. **Technical document:** this Markdown overview or a short PDF covering the approach, assets and training data, possession rules, limitations, and reproduction.
+3. **Public repository:** [ultron513/mtah_2026_gradient_descendants](https://github.com/ultron513/mtah_2026_gradient_descendants).
